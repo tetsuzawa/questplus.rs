@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use ndarray::prelude::*;
 use num::{Float, Num};
+use std::collections::HashMap;
 
 enum StimScale {
     Linear,
@@ -21,9 +21,9 @@ enum ParamEstimationMethod {
 }
 
 struct QuestPlus<F, D, O>
-    where
-        F: Fn(/*TODO args*/),
-        D: Dimension,
+where
+    F: Fn(/*TODO args*/),
+    D: Dimension,
 {
     stim_domain: HashMap<String, Array1<f64>>,
     param_domain: HashMap<String, Array1<f64>>,
@@ -41,9 +41,9 @@ struct QuestPlus<F, D, O>
 }
 
 impl<F, D, O> QuestPlus<F, D, O>
-    where
-        F: Fn(/*TODO args*/),
-        D: Dimension,
+where
+    F: Fn(/*TODO args*/),
+    D: Dimension,
 {
     fn new(
         stim_domain: HashMap<String, Array1<f64>>,
