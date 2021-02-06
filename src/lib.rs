@@ -1,5 +1,5 @@
 use ndarray::prelude::*;
-use num::{Float};
+use num::Float;
 use std::collections::HashMap;
 
 enum StimScale {
