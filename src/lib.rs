@@ -12,35 +12,34 @@ use statrs::distribution::{Normal, Univariate};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
-enum StimScale {
+#[derive(Debug)]
+pub enum StimScale {
     Linear,
     Log10,
     Decibel,
 }
 
-enum StimSelectionMethod {
+#[derive(Debug)]
+pub enum StimSelectionMethod {
     MinEntropy,
     /* todo
     MinNEntropy(i32),
      */
 }
 
-enum ParamEstimationMethod {
+#[derive(Debug)]
+pub enum ParamEstimationMethod {
     Mode,
     Mean,
 }
 
 trait QuestPlus {
     type T1;
-    type T2;
     fn calc_pf(&self) -> Result<Self::T1, QuestPlusError>;
-    // fn gen_prior(&self) -> Result<Self::T, QuestPlusError>;
-    fn gen_likelihoods(&self) -> Result<Self::T2, QuestPlusError>;
 }
 
 impl QuestPlus for NormCDF {
     type T1 = Array5<f64>;
-    type T2 = Array6<f64>;
 
     fn calc_pf(&self) -> Result<Self::T1, QuestPlusError> {
         let num_elements = self.stim_domain.intensity.len()
@@ -68,16 +67,6 @@ impl QuestPlus for NormCDF {
             ),
             v,
         ) {
-            Ok(a) => Ok(a),
-            Err(e) => Err(QuestPlusError::NDArrayError(e)),
-        }
-    }
-
-    fn gen_likelihoods(&self) -> Result<Self::T2, QuestPlusError> {
-        let prop_correct = self.calc_pf()?;
-        let prop_incorrect = prop_correct.mapv(|v| 1. - v);
-        let pf_values = stack(Axis(0), &[prop_correct.view(), prop_incorrect.view()]);
-        match pf_values {
             Ok(a) => Ok(a),
             Err(e) => Err(QuestPlusError::NDArrayError(e)),
         }
