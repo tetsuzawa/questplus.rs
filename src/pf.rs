@@ -157,9 +157,10 @@ impl NormCDFPriorPDFFactory for NormCDFParamPDF {
 }
 
 pub struct NormCDF {
+    pub stim_domain: NormCDFStimDomain,
     pub param_domain: NormCDFParamDomain,
     pub prior_pdf: NormCDFParamPDF,
-    pub stim_domain: NormCDFStimDomain,
+    pub posterior_pdf: NormCDFParamPDF,
 }
 
 impl NormCDF {
@@ -172,6 +173,7 @@ impl NormCDF {
             stim_domain,
             param_domain,
             prior_pdf,
+            posterior_pdf:prior_pdf.clone(),
         }
     }
 
