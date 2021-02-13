@@ -1,9 +1,19 @@
 use crate::error::QuestPlusError;
+use crate::{ParamEstimationMethod, StimSelectionMethod};
 use itertools::iproduct;
 use ndarray::prelude::*;
+use ndarray::stack;
+use num::Float;
 use statrs::distribution::{Normal, Univariate};
 use std::error::Error;
 
+#[derive(Debug)]
+pub enum Outcome {
+    Correct,
+    Incorrect,
+}
+
+#[derive(Debug)]
 pub struct NormCDFStimDomain {
     pub intensity: Array1<f64>,
 }
@@ -14,6 +24,7 @@ impl NormCDFStimDomain {
     }
 }
 
+#[derive(Debug)]
 pub struct NormCDFParamDomain {
     pub mean: Array1<f64>,
     pub sd: Array1<f64>,
@@ -151,10 +162,18 @@ impl NormCDFPriorPDFFactory for NormCDFParamPDF {
     }
 }
 
+#[derive(Debug)]
 pub struct NormCDF {
+    pub stim_domain: NormCDFStimDomain,
     pub param_domain: NormCDFParamDomain,
     pub prior_pdf: NormCDFParamPDF,
-    pub stim_domain: NormCDFStimDomain,
+    pub posterior_pdf: NormCDFParamPDF,
+    pub likelihoods: Array6<f64>,
+    pub stim_selection_method: StimSelectionMethod,
+    pub param_estimation_method: ParamEstimationMethod,
+    pub resp_history: Vec<f64>,
+    pub stim_history: Vec<f64>,
+    pub entropy: f64,
 }
 
 impl NormCDF {
@@ -162,12 +181,26 @@ impl NormCDF {
         stim_domain: NormCDFStimDomain,
         param_domain: NormCDFParamDomain,
         prior_pdf: NormCDFParamPDF,
-    ) -> Self {
-        NormCDF {
+        stim_selection_method: StimSelectionMethod,
+        param_estimation_method: ParamEstimationMethod,
+    ) -> Result<Self, QuestPlusError> {
+        let likelihoods = Self::gen_likelihoods(&stim_domain, &param_domain)?;
+        let posterior_pdf = prior_pdf.clone();
+        let resp_history = Vec::new();
+        let stim_history = Vec::new();
+        let entropy = f64::max_value();
+        Ok(NormCDF {
             stim_domain,
             param_domain,
             prior_pdf,
-        }
+            posterior_pdf,
+            likelihoods,
+            stim_selection_method,
+            param_estimation_method,
+            resp_history,
+            stim_history,
+            entropy,
+        })
     }
 
     pub fn f(
@@ -183,12 +216,61 @@ impl NormCDF {
         };
         Ok(lower_asymptote + (1.0 - lower_asymptote - lapse_rate) * norm.cdf(intensity))
     }
+
+    fn apply_fields(
+        stim_domain: &NormCDFStimDomain,
+        param_domain: &NormCDFParamDomain,
+    ) -> Result<Array5<f64>, QuestPlusError> {
+        let num_elements = stim_domain.intensity.len()
+            * param_domain.mean.len()
+            * param_domain.sd.len()
+            * param_domain.lower_asymptote.len()
+            * param_domain.lapse_rate.len();
+        let mut v = Vec::with_capacity(num_elements);
+        for (x, m, s, la, lr) in iproduct!(
+            stim_domain.intensity.iter(),
+            param_domain.mean.iter(),
+            param_domain.sd.iter(),
+            param_domain.lower_asymptote.iter(),
+            param_domain.lapse_rate.iter()
+        ) {
+            v.push(NormCDF::f(*x, *m, *s, *la, *lr)?);
+        }
+        match Array5::from_shape_vec(
+            (
+                stim_domain.intensity.len(),
+                param_domain.mean.len(),
+                param_domain.sd.len(),
+                param_domain.lower_asymptote.len(),
+                param_domain.lapse_rate.len(),
+            ),
+            v,
+        ) {
+            Ok(a) => Ok(a),
+            Err(e) => Err(QuestPlusError::NDArrayError(e)),
+        }
+    }
+
+    fn gen_likelihoods(
+        stim_domain: &NormCDFStimDomain,
+        param_domain: &NormCDFParamDomain,
+    ) -> Result<Array6<f64>, QuestPlusError> {
+        let prop_correct = Self::apply_fields(stim_domain, param_domain)?;
+        let prop_incorrect = prop_correct.mapv(|v| 1. - v);
+        let pf_values = stack(Axis(0), &[prop_correct.view(), prop_incorrect.view()]);
+        match pf_values {
+            Ok(a) => Ok(a),
+            Err(e) => Err(QuestPlusError::NDArrayError(e)),
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::pf::{NormCDF, NormCDFParamDomain, NormCDFParamPDF, NormCDFPriorPDFFactory, NormCDFStimDomain};
-    use crate::QuestPlus;
+    use crate::pf::{
+        NormCDF, NormCDFParamDomain, NormCDFParamPDF, NormCDFPriorPDFFactory, NormCDFStimDomain,
+    };
+    use crate::{ParamEstimationMethod, QuestPlus, StimSelectionMethod};
     use ndarray::prelude::*;
 
     #[test]
@@ -433,11 +515,42 @@ mod tests {
         let param_domain = NormCDFParamDomain::new(mean, sd, lower_asymptote, lapse_rate);
         let prior_pdf = NormCDFParamPDF::new(&param_domain, None, None, None, None).unwrap();
 
-        let norm_cdf = NormCDF::new(stim_domain, param_domain, prior_pdf);
+        let norm_cdf = NormCDF::new(
+            stim_domain,
+            param_domain,
+            prior_pdf,
+            StimSelectionMethod::MinEntropy,
+            ParamEstimationMethod::Mean,
+        )
+        .unwrap();
 
         let result = norm_cdf.calc_pf().unwrap();
         println!("{:?}", result);
 
         assert!(result.all_close(&want, 1e-8));
+    }
+
+    #[test]
+    fn test_new() {
+        let intensity: Array1<f64> = Array1::range(0., 50., 1.);
+        let mean: Array1<f64> = Array1::range(7., 9., 1.);
+        let sd: Array1<f64> = Array1::range(7., 8., 0.5);
+        let lower_asymptote: Array1<f64> = arr1(&[0.5]);
+        let lapse_rate: Array1<f64> = Array1::range(0.01, 0.02, 0.01);
+        // want_slice is generated by Python code
+
+        let stim_domain = NormCDFStimDomain::new(intensity);
+        let param_domain = NormCDFParamDomain::new(mean, sd, lower_asymptote, lapse_rate);
+        let prior_pdf = NormCDFParamPDF::new(&param_domain, None, None, None, None).unwrap();
+
+        let norm_cdf = NormCDF::new(
+            stim_domain,
+            param_domain,
+            prior_pdf,
+            StimSelectionMethod::MinEntropy,
+            ParamEstimationMethod::Mean,
+        )
+        .unwrap();
+        dbg!(norm_cdf);
     }
 }

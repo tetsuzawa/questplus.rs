@@ -6,40 +6,42 @@ use crate::pf::NormCDF;
 use itertools::iproduct;
 use itertools::Itertools;
 use ndarray::prelude::*;
+use ndarray::stack;
 use num::Float;
 use statrs::distribution::{Normal, Univariate};
 use std::collections::{HashMap, HashSet};
 use std::error::Error;
 
-enum StimScale {
+#[derive(Debug)]
+pub enum StimScale {
     Linear,
     Log10,
     Decibel,
 }
 
-enum StimSelectionMethod {
+#[derive(Debug)]
+pub enum StimSelectionMethod {
     MinEntropy,
     /* todo
     MinNEntropy(i32),
      */
 }
 
-enum ParamEstimationMethod {
+#[derive(Debug)]
+pub enum ParamEstimationMethod {
     Mode,
     Mean,
 }
 
 trait QuestPlus {
-    type T;
-    fn calc_pf(&self) -> Result<Self::T, QuestPlusError>;
-    // fn gen_prior(&self) -> Result<Self::T, QuestPlusError>;
-    // fn gen_likelihoods(&self) ->Result<Self::T, QuestPlusError>;
+    type T1;
+    fn calc_pf(&self) -> Result<Self::T1, QuestPlusError>;
 }
 
 impl QuestPlus for NormCDF {
-    type T = Array5<f64>;
+    type T1 = Array5<f64>;
 
-    fn calc_pf(&self) -> Result<Self::T, QuestPlusError> {
+    fn calc_pf(&self) -> Result<Self::T1, QuestPlusError> {
         let num_elements = self.stim_domain.intensity.len()
             * self.param_domain.mean.len()
             * self.param_domain.sd.len()
