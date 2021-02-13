@@ -1,48 +1,194 @@
+use crate::error::QuestPlusError;
+use itertools::iproduct;
 use ndarray::prelude::*;
 use statrs::distribution::{Normal, Univariate};
 use std::error::Error;
 
-pub fn norm_cdf(
-    intensity: &Array1<f64>,
-    mean: &Array1<f64>,
-    sd: &Array1<f64>,
-    lower_asymptote: &Array1<f64>,
-    lapse_rate: &Array1<f64>,
-) -> Result<Array5<f64>, Box<dyn Error>> {
-    let f = |x, mean, sd, lower_asymptote, lapse_rate| -> Result<f64, Box<dyn Error>> {
-        let norm = Normal::new(mean, sd)?;
-        Ok(lower_asymptote + (1.0 - lower_asymptote - lapse_rate) * norm.cdf(x))
-    };
-    let num_elements =
-        intensity.len() * mean.len() * sd.len() * lower_asymptote.len() * lapse_rate.len();
-    let mut v = Vec::with_capacity(num_elements);
-    for x in intensity.iter() {
-        for m in mean.iter() {
-            for s in sd.iter() {
-                for la in lower_asymptote.iter() {
-                    for lr in lapse_rate.iter() {
-                        v.push(f(*x, *m, *s, *la, *lr)?);
-                    }
-                }
-            }
+pub struct NormCDFStimDomain {
+    pub intensity: Array1<f64>,
+}
+
+impl NormCDFStimDomain {
+    pub fn new(intensity: Array1<f64>) -> Self {
+        NormCDFStimDomain { intensity }
+    }
+}
+
+pub struct NormCDFParamDomain {
+    pub mean: Array1<f64>,
+    pub sd: Array1<f64>,
+    pub lower_asymptote: Array1<f64>,
+    pub lapse_rate: Array1<f64>,
+}
+
+impl NormCDFParamDomain {
+    pub fn new(
+        mean: Array1<f64>,
+        sd: Array1<f64>,
+        lower_asymptote: Array1<f64>,
+        lapse_rate: Array1<f64>,
+    ) -> Self {
+        NormCDFParamDomain {
+            mean,
+            sd,
+            lower_asymptote,
+            lapse_rate,
         }
     }
-    Ok(Array::from_shape_vec(
-        (
-            intensity.len(),
-            mean.len(),
-            sd.len(),
-            lower_asymptote.len(),
-            lapse_rate.len(),
-        ),
-        v,
-    )?
-    .into())
+}
+
+pub type NormCDFParamPDF = Array4<f64>;
+
+pub trait NormCDFPriorPDFFactory {
+    fn new(
+        param_domain: &NormCDFParamDomain,
+        mean: Option<Array1<f64>>,
+        sd: Option<Array1<f64>>,
+        lower_asymptote: Option<Array1<f64>>,
+        lapse_rate: Option<Array1<f64>>,
+    ) -> Result<Array4<f64>, QuestPlusError>;
+}
+
+impl NormCDFPriorPDFFactory for NormCDFParamPDF {
+    fn new(
+        param_domain: &NormCDFParamDomain,
+        mean: Option<Array1<f64>>,
+        sd: Option<Array1<f64>>,
+        lower_asymptote: Option<Array1<f64>>,
+        lapse_rate: Option<Array1<f64>>,
+    ) -> Result<Self, QuestPlusError> {
+        let mean_prior = match mean {
+            Some(s) => {
+                if param_domain.mean.len() != s.len() {
+                    return Err(QuestPlusError::ParameterLengthNotMatch(
+                        "mean".to_string(),
+                        "mean_prior".to_string(),
+                    ));
+                }
+                s
+            }
+            None => Array1::ones(param_domain.mean.len()),
+        };
+        let sum = mean_prior.sum();
+        let mean_prior = mean_prior.mapv(|v| v / sum);
+
+        let sd_prior = match sd {
+            Some(s) => {
+                if param_domain.sd.len() != s.len() {
+                    return Err(QuestPlusError::ParameterLengthNotMatch(
+                        "sd".to_string(),
+                        "sd_prior".to_string(),
+                    ));
+                }
+                s
+            }
+            None => Array1::ones(param_domain.sd.len()),
+        };
+        let sum = sd_prior.sum();
+        let sd_prior = sd_prior.mapv(|v| v / sum);
+
+        let lower_asymptote_prior = match lower_asymptote {
+            Some(s) => {
+                if param_domain.lower_asymptote.len() != s.len() {
+                    return Err(QuestPlusError::ParameterLengthNotMatch(
+                        "lower_asymptote".to_string(),
+                        "lower_asymptote_prior".to_string(),
+                    ));
+                }
+                s
+            }
+            None => Array1::ones(param_domain.lower_asymptote.len()),
+        };
+        let sum = lower_asymptote_prior.sum();
+        let lower_asymptote_prior = lower_asymptote_prior.mapv(|v| v / sum);
+
+        let lapse_rate_prior = match lapse_rate {
+            Some(s) => {
+                if param_domain.lapse_rate.len() != s.len() {
+                    return Err(QuestPlusError::ParameterLengthNotMatch(
+                        "lapse_rate".to_string(),
+                        "lapse_rate_prior".to_string(),
+                    ));
+                }
+                s
+            }
+            None => Array1::ones(param_domain.lapse_rate.len()),
+        };
+        let sum = lapse_rate_prior.sum();
+        let lapse_rate_prior = lapse_rate_prior.mapv(|v| v / sum);
+
+        let mut v = Vec::with_capacity(
+            mean_prior.len()
+                * sd_prior.len()
+                * lower_asymptote_prior.len()
+                * lapse_rate_prior.len(),
+        );
+        for (m, s, la, lr) in iproduct!(
+            mean_prior.iter(),
+            sd_prior.iter(),
+            lower_asymptote_prior.iter(),
+            lapse_rate_prior.iter()
+        ) {
+            v.push(m * s * la * lr)
+        }
+
+        let res = Array4::from_shape_vec(
+            (
+                mean_prior.len(),
+                sd_prior.len(),
+                lower_asymptote_prior.len(),
+                lapse_rate_prior.len(),
+            ),
+            v,
+        );
+        let res = match res {
+            Ok(a) => a,
+            Err(e) => return Err(QuestPlusError::NDArrayError(e)),
+        };
+        let sum = res.sum();
+        let res = res.mapv(|v| v / sum);
+        Ok(res)
+    }
+}
+
+pub struct NormCDF {
+    pub param_domain: NormCDFParamDomain,
+    pub prior_pdf: NormCDFParamPDF,
+    pub stim_domain: NormCDFStimDomain,
+}
+
+impl NormCDF {
+    pub fn new(
+        stim_domain: NormCDFStimDomain,
+        param_domain: NormCDFParamDomain,
+        prior_pdf: NormCDFParamPDF,
+    ) -> Self {
+        NormCDF {
+            stim_domain,
+            param_domain,
+            prior_pdf,
+        }
+    }
+
+    pub fn f(
+        intensity: f64,
+        mean: f64,
+        sd: f64,
+        lower_asymptote: f64,
+        lapse_rate: f64,
+    ) -> Result<f64, QuestPlusError> {
+        let norm = match Normal::new(mean, sd) {
+            Ok(a) => a,
+            Err(e) => return Err(QuestPlusError::StatrsError(e)),
+        };
+        Ok(lower_asymptote + (1.0 - lower_asymptote - lapse_rate) * norm.cdf(intensity))
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::pf::norm_cdf;
+    use crate::pf::{NormCDF, NormCDFParamDomain, NormCDFParamPDF, NormCDFPriorPDFFactory, NormCDFStimDomain};
+    use crate::QuestPlus;
     use ndarray::prelude::*;
 
     #[test]
@@ -52,12 +198,6 @@ mod tests {
         let sd: Array1<f64> = Array1::range(7., 8., 0.5);
         let lower_asymptote: Array1<f64> = arr1(&[0.5]);
         let lapse_rate: Array1<f64> = Array1::range(0.01, 0.02, 0.01);
-
-        let num_elements =
-            intensity.len() * mean.len() * sd.len() * lower_asymptote.len() * lapse_rate.len();
-
-        let result = norm_cdf(&intensity, &mean, &sd, &lower_asymptote, &lapse_rate).unwrap();
-        println!("{:?}", result);
         // want_slice is generated by Python code
         let want_slice = [
             [
@@ -261,6 +401,8 @@ mod tests {
                 [[[0.9899999988462997]], [[0.9899999887648576]]],
             ],
         ];
+        let num_elements =
+            intensity.len() * mean.len() * sd.len() * lower_asymptote.len() * lapse_rate.len();
         let mut want_vec = Vec::with_capacity(num_elements);
         for a in want_slice.iter() {
             for b in a.iter() {
@@ -273,6 +415,7 @@ mod tests {
                 }
             }
         }
+
         let want: Array5<f64> = Array::from_shape_vec(
             (
                 intensity.len(),
@@ -285,6 +428,16 @@ mod tests {
         )
         .unwrap()
         .into();
+
+        let stim_domain = NormCDFStimDomain::new(intensity);
+        let param_domain = NormCDFParamDomain::new(mean, sd, lower_asymptote, lapse_rate);
+        let prior_pdf = NormCDFParamPDF::new(&param_domain, None, None, None, None).unwrap();
+
+        let norm_cdf = NormCDF::new(stim_domain, param_domain, prior_pdf);
+
+        let result = norm_cdf.calc_pf().unwrap();
+        println!("{:?}", result);
+
         assert!(result.all_close(&want, 1e-8));
     }
 }
