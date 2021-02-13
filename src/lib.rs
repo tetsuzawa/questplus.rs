@@ -1,8 +1,15 @@
+pub mod error;
 pub mod pf;
 
+use crate::error::QuestPlusError;
+use crate::pf::NormCDF;
+use itertools::iproduct;
+use itertools::Itertools;
 use ndarray::prelude::*;
 use num::Float;
-use std::collections::HashMap;
+use statrs::distribution::{Normal, Univariate};
+use std::collections::{HashMap, HashSet};
+use std::error::Error;
 
 enum StimScale {
     Linear,
@@ -22,70 +29,44 @@ enum ParamEstimationMethod {
     Mean,
 }
 
-struct QuestPlus<F, D, O>
-where
-    F: Fn(/*TODO args*/),
-    D: Dimension,
-{
-    stim_domain: HashMap<String, Array1<f64>>,
-    param_domain: HashMap<String, Array1<f64>>,
-    outcome_domain: HashMap<String, O>,
-    prior: Array<f64, D>,
-    posterior: Array<f64, D>,
-    func: F,
-    stim_scalse: StimScale,
-    stim_selection_method: StimSelectionMethod,
-    // stim_selection_options: TODO
-    param_estimation_method: ParamEstimationMethod,
-    entropy: f64,
-    resp_history: Vec<O>,
-    stim_history: Vec<f64>,
+trait QuestPlus {
+    type T;
+    fn calc_pf(&self) -> Result<Self::T, QuestPlusError>;
+    // fn gen_prior(&self) -> Result<Self::T, QuestPlusError>;
+    // fn gen_likelihoods(&self) ->Result<Self::T, QuestPlusError>;
 }
 
-impl<F, D, O> QuestPlus<F, D, O>
-where
-    F: Fn(/*TODO args*/),
-    D: Dimension,
-{
-    fn new(
-        stim_domain: HashMap<String, Array1<f64>>,
-        param_domain: HashMap<String, Array1<f64>>,
-        outcome_domain: HashMap<String, O>,
-        prior: Option<HashMap<String, Array1<f64>>>,
-        func: F,
-        stim_scalse: StimScale,
-        stim_selection_method: StimSelectionMethod,
-        // stim_selection_options: TODO
-        param_estimation_method: ParamEstimationMethod,
-    ) -> Self {
-        let prior = QuestPlus::<F, D, O>::gen_prior(prior);
-        let posterior = prior.clone();
-        QuestPlus {
-            stim_domain,
-            param_domain,
-            outcome_domain,
-            prior,
-            posterior,
-            func,
-            stim_scalse,
-            stim_selection_method,
-            // stim_selection_options: TODO
-            param_estimation_method,
-            entropy: f64::max_value(),
-            resp_history: Vec::new(),
-            stim_history: Vec::new(),
+impl QuestPlus for NormCDF {
+    type T = Array5<f64>;
+
+    fn calc_pf(&self) -> Result<Self::T, QuestPlusError> {
+        let num_elements = self.stim_domain.intensity.len()
+            * self.param_domain.mean.len()
+            * self.param_domain.sd.len()
+            * self.param_domain.lower_asymptote.len()
+            * self.param_domain.lapse_rate.len();
+        let mut v = Vec::with_capacity(num_elements);
+        for (x, m, s, la, lr) in iproduct!(
+            self.stim_domain.intensity.iter(),
+            self.param_domain.mean.iter(),
+            self.param_domain.sd.iter(),
+            self.param_domain.lower_asymptote.iter(),
+            self.param_domain.lapse_rate.iter()
+        ) {
+            v.push(NormCDF::f(*x, *m, *s, *la, *lr)?);
         }
-    }
-
-    fn gen_prior(prior: Option<HashMap<String, Array1<f64>>>) -> Array<f64, D> {
-        todo!()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
+        match Array5::from_shape_vec(
+            (
+                self.stim_domain.intensity.len(),
+                self.param_domain.mean.len(),
+                self.param_domain.sd.len(),
+                self.param_domain.lower_asymptote.len(),
+                self.param_domain.lapse_rate.len(),
+            ),
+            v,
+        ) {
+            Ok(a) => Ok(a),
+            Err(e) => Err(QuestPlusError::NDArrayError(e)),
+        }
     }
 }
