@@ -7,6 +7,7 @@ use num::Float;
 use statrs::distribution::{Normal, Univariate};
 use std::error::Error;
 
+#[derive(Debug)]
 pub enum Outcome {
     Correct,
     Incorrect,
