@@ -4,6 +4,11 @@ use ndarray::prelude::*;
 use statrs::distribution::{Normal, Univariate};
 use std::error::Error;
 
+pub enum Outcome{
+    Correct,
+    Incorrect
+}
+
 pub struct NormCDFStimDomain {
     pub intensity: Array1<f64>,
 }
