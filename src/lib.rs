@@ -2,8 +2,8 @@ pub mod error;
 pub mod pf;
 
 use crate::error::QuestPlusError;
-use crate::pf::NormCDF;
-use itertools::iproduct;
+use crate::pf::{NormCDF, NormCDFParamPDF, NormCDFPriorPDFFactory};
+use itertools::{iproduct, izip};
 use itertools::Itertools;
 use ndarray::prelude::*;
 use ndarray::stack;
@@ -36,6 +36,7 @@ pub enum ParamEstimationMethod {
 trait QuestPlus {
     type T1;
     fn calc_pf(&self) -> Result<Self::T1, QuestPlusError>;
+    fn next_stim(&self) -> Result<f64, QuestPlusError>;
 }
 
 impl QuestPlus for NormCDF {
@@ -70,5 +71,56 @@ impl QuestPlus for NormCDF {
             Ok(a) => Ok(a),
             Err(e) => Err(QuestPlusError::NDArrayError(e)),
         }
+    }
+
+    fn next_stim(&self) -> Result<f64, QuestPlusError>{
+        let ax = 0;
+        let mut new_posterior = self.likelihoods.clone();
+
+        for (ax_p, ax_l) in izip!(&[0,1,2,3],&[2,3,4,5]){
+            for (mut axis_new, axis, v) in izip!( new_posterior.axis_iter_mut(Axis(*ax_l)), self.posterior_pdf.axis_iter(Axis(*ax_p)), self.likelihoods.axis_iter(Axis(*ax_l))){
+                dbg!(&axis_new);
+                dbg!(&axis);
+                dbg!(&v);
+                axis_new = axis * v;
+            }
+        }
+
+
+        let new_posterior = &self.posterior_pdf * &self.likelihoods;
+        todo!()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::pf::{
+        NormCDF, NormCDFParamDomain, NormCDFParamPDF, NormCDFPriorPDFFactory, NormCDFStimDomain,
+    };
+    use crate::{ParamEstimationMethod, QuestPlus, StimSelectionMethod};
+    use ndarray::prelude::*;
+
+
+    #[test]
+    fn test_next_stim() {
+        let intensity: Array1<f64> = Array1::range(0., 50., 1.);
+        let mean: Array1<f64> = Array1::range(7., 9., 1.);
+        let sd: Array1<f64> = Array1::range(7., 8., 0.5);
+        let lower_asymptote: Array1<f64> = arr1(&[0.5]);
+        let lapse_rate: Array1<f64> = Array1::range(0.01, 0.02, 0.01);
+
+        let stim_domain = NormCDFStimDomain::new(intensity);
+        let param_domain = NormCDFParamDomain::new(mean, sd, lower_asymptote, lapse_rate);
+        let prior_pdf = NormCDFParamPDF::new(&param_domain, None, None, None, None).unwrap();
+
+        let norm_cdf = NormCDF::new(
+            stim_domain,
+            param_domain,
+            prior_pdf,
+            StimSelectionMethod::MinEntropy,
+            ParamEstimationMethod::Mean,
+        )
+            .unwrap();
+        norm_cdf.next_stim().unwrap();
     }
 }

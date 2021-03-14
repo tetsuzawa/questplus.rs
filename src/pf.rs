@@ -58,6 +58,10 @@ pub trait NormCDFPriorPDFFactory {
         lower_asymptote: Option<Array1<f64>>,
         lapse_rate: Option<Array1<f64>>,
     ) -> Result<Array4<f64>, QuestPlusError>;
+    fn index_axis_mean() -> usize;
+    fn index_axis_sd() -> usize;
+    fn index_axis_lower_asymptote() -> usize;
+    fn index_axis_lapse_rate() -> usize;
 }
 
 impl NormCDFPriorPDFFactory for NormCDFParamPDF {
@@ -159,6 +163,22 @@ impl NormCDFPriorPDFFactory for NormCDFParamPDF {
         let sum = res.sum();
         let res = res.mapv(|v| v / sum);
         Ok(res)
+    }
+
+    fn index_axis_mean() -> usize {
+        0
+    }
+
+    fn index_axis_sd() -> usize {
+        1
+    }
+
+    fn index_axis_lower_asymptote() -> usize {
+        2
+    }
+
+    fn index_axis_lapse_rate() -> usize {
+        3
     }
 }
 
